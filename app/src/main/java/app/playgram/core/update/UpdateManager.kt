@@ -65,6 +65,7 @@ class UpdateManager private constructor(private val context: Context) {
                 prefs.edit().putLong("last_check", System.currentTimeMillis()).apply()
                 if (info != null && isNewer(info.version, BuildConfig.VERSION_NAME)) UpdateState.Available(info) else UpdateState.UpToDate
             } catch (e: Exception) {
+                android.util.Log.w("PlaygramUpdate", "Update check failed", e)
                 UpdateState.Failed("Couldn't check for updates. Check your connection and try again.")
             }
         }
@@ -84,7 +85,8 @@ class UpdateManager private constructor(private val context: Context) {
                 return UpdateInfo(
                     version = json.getString("tag_name").trim().removePrefix("v").removePrefix("V"),
                     notes = json.optString("body", "").trim(),
-                    apkUrl = a.getString("browser_download_url"),
+                    // The API asset URL (api.github.com) is reachable on networks that block github.com itself; it redirects to the file.
+                    apkUrl = a.getString("url"),
                     sizeBytes = a.optLong("size", 0L)
                 )
             }
@@ -101,6 +103,7 @@ class UpdateManager private constructor(private val context: Context) {
                 val file = File(dir, "Playgram-${info.version}.apk")
                 val conn = URL(info.apkUrl).openConnection() as HttpURLConnection
                 conn.setRequestProperty("User-Agent", "Playgram/${BuildConfig.VERSION_NAME}")
+                conn.setRequestProperty("Accept", "application/octet-stream")
                 conn.connectTimeout = 15_000; conn.readTimeout = 30_000
                 val total = conn.contentLengthLong.takeIf { it > 0 } ?: info.sizeBytes
                 conn.inputStream.use { input ->
@@ -124,6 +127,7 @@ class UpdateManager private constructor(private val context: Context) {
                 _state.value = UpdateState.Available(info)
                 install(file)
             } catch (e: Exception) {
+                android.util.Log.w("PlaygramUpdate", "Update download failed", e)
                 _state.value = UpdateState.Failed("Download failed. Try again.")
             }
         }
