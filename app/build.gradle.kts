@@ -21,8 +21,8 @@ android {
         applicationId = "app.playgram"
         minSdk = 26
         targetSdk = 35
-        versionCode = 15
-        versionName = "1.0.1"
+        versionCode = 16
+        versionName = "1.0.2"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
@@ -83,11 +83,8 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.security.crypto)
 
-    // Telegram TDLib (Prebuilt Core from extracted native)
-    // implementation(libs.tdlib.core)
-
-    // Native mpv/FFmpeg playback engine
-    implementation(libs.libmpvkt.compose)
+    // Telegram TDLib 1.8.x: official sources, prebuilt for Android (Maven Central)
+    implementation(libs.tdlib.core)
 
     // Media3 ExoPlayer
     implementation(libs.media3.exoplayer)

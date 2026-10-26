@@ -17,11 +17,9 @@ room = "2.6.1"
 ksp = "2.0.21-1.0.28"
 securityCrypto = "1.1.0-alpha06"
 tdlib = "0.1.1"
-libmpvkt = "0.2.0"
 
 [libraries]
 tdlib-core = { group = "io.github.tdlib-android", name = "core", version.ref = "tdlib" }
-libmpvkt-compose = { group = "io.github.yuroyami", name = "libmpvkt-compose", version.ref = "libmpvkt" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }

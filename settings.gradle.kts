@@ -16,10 +16,6 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        maven {
-            url = java.net.URI("https://yuroyami.github.io/maven")
-            content { includeModuleByRegex("io\\.github\\.yuroyami", "libmpvkt.*") }
-        }
         maven { url = java.net.URI("https://jitpack.io") }
     }
 }
