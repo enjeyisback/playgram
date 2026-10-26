@@ -1,0 +1,14 @@
+# Secrets and machine-specific
+local.properties
+*.keystore
+*.jks
+
+# Build output
+build/
+.gradle/
+.idea/
+*.apk
+*.aab
+
+# Native libraries extracted from the original app: not redistributed here
+app/src/main/jniLibs/

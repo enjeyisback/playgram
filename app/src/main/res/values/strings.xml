@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Playgram</string>
+    <string name="download_share_target">Download with Playgram</string>
+    <string name="play_share_target">Play in Playgram</string>
+    <string name="browser_share_target">Playgram browser</string>
+    <string name="tab_home">Home</string>
+    <string name="tab_chats">Chats</string>
+    <string name="tab_downloads">Downloads</string>
+    <string name="tab_library">Library</string>
+    <string name="tab_devices">Devices</string>
+</resources>
