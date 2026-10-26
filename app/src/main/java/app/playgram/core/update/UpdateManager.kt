@@ -58,6 +58,8 @@ class UpdateManager private constructor(private val context: Context) {
 
     fun check() {
         if (!enabled || _state.value is UpdateState.Checking || _state.value is UpdateState.Downloading) return
+        // A manual check brings the dialog back even after "Later".
+        _dialogDismissed.value = false
         _state.value = UpdateState.Checking
         scope.launch {
             _state.value = try {
