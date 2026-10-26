@@ -544,29 +544,6 @@ class TelegramManager(private val context: Context) {
         }
     }
 
-    /** What a Telegram link points at. */
-    sealed class LinkTarget {
-        data class Video(val media: MediaItem) : LinkTarget()
-        data class Chat(val chatId: Long) : LinkTarget()
-        object None : LinkTarget()
-    }
-
-    /** Resolves a t.me link (message in a channel, or a channel itself) through TDLib. */
-    fun resolveLink(url: String, onResult: (LinkTarget) -> Unit) {
-        val c = tdClient
-        if (!loggedIn || c == null) { onResult(LinkTarget.None); return }
-        c.send(TdApi.GetMessageLinkInfo(url)) { res ->
-            val info = res as? TdApi.MessageLinkInfo
-            val msg = info?.message
-            val media = msg?.let { mediaOf(it.chatId, it) }
-            onResult(when {
-                media != null -> LinkTarget.Video(media)
-                info != null && info.chatId != 0L && msg == null -> LinkTarget.Chat(info.chatId)
-                else -> LinkTarget.None
-            })
-        }
-    }
-
     private fun textOf(content: TdApi.MessageContent): String = when (content) {
         is TdApi.MessageText -> content.text.text
         is TdApi.MessageVideo -> content.caption.text

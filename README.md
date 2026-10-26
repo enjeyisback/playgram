@@ -7,7 +7,7 @@ Kotlin + Jetpack Compose, TDLib for Telegram, Media3 for playback.
 ## Download
 
 Get the latest APK from the [Releases page](https://github.com/enjeyisback/playgram/releases/latest)
-([direct link to v1.0.4](https://github.com/enjeyisback/playgram/releases/download/v1.0.4/Playgram-1.0.4.apk), 65 MB).
+([direct link to v1.0.5](https://github.com/enjeyisback/playgram/releases/download/v1.0.5/Playgram-1.0.5.apk), 65 MB).
 
 1. Open the link on your Android phone (Android 8.0 or newer) and download `Playgram-<version>.apk`.
 2. Tap the file and allow "install unknown apps" for your browser when Android asks.

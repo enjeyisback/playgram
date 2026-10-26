@@ -397,9 +397,17 @@ private fun PlayerScreenContent(
     androidx.activity.compose.BackHandler(enabled = fullscreen) { setFullscreen(false) }
     // Settings -> "Back button enters picture-in-picture": Back while playing floats the video.
     val pipBackPref = remember { prefs.getBoolean("pip_back", false) }
-    androidx.activity.compose.BackHandler(enabled = pipBackPref && isPlaying && !fullscreen && !inPip && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        try { activity?.enterPictureInPictureMode(pip.params(false)) } catch (_: Exception) { onBack() }
+    // Leaving with Back (system button or the arrow in the top bar): float the video when the setting is on.
+    fun leavePlayer() {
+        if (pipBackPref && isPlaying && !fullscreen && !inPip && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && activity != null) {
+            val entered = try { activity.enterPictureInPictureMode(pip.params(false)) } catch (e: Exception) {
+                android.util.Log.e("PlaygramPlayer", "Back to PiP failed", e); false
+            }
+            if (entered) return
+        }
+        onBack()
     }
+    androidx.activity.compose.BackHandler(enabled = pipBackPref && !fullscreen && !inPip) { leavePlayer() }
     LaunchedEffect(Unit) { if (startFullscreen) setFullscreen(true) }
 
     fun save() {
@@ -561,7 +569,7 @@ private fun PlayerScreenContent(
                         .padding(horizontal = 4.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(onClick = { if (fullscreen) setFullscreen(false) else onBack() }) {
+                    IconButton(onClick = { if (fullscreen) setFullscreen(false) else leavePlayer() }) {
                         Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back", tint = Color.White)
                     }
                     Column(Modifier.weight(1f)) {

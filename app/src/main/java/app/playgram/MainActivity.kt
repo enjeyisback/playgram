@@ -26,8 +26,7 @@ class MainActivity : ComponentActivity() {
         }
 
         try {
-            // A recreated activity gets the original intent again; don't replay a share/link from history.
-            if (savedInstanceState == null && intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY == 0) handleIncomingIntent(intent)
+            handleIncomingIntent(intent)
         } catch (e: Throwable) {
             Log.e("MainActivity", "Error handling intent", e)
         }
@@ -100,6 +99,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIncomingIntent(intent: Intent?) {
-        Incoming.from(this, intent)?.let { Incoming.pending.value = it }
+        intent ?: return
     }
 }
