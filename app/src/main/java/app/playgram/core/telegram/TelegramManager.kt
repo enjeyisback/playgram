@@ -77,13 +77,22 @@ class TelegramManager(private val context: Context) {
     private val _signedIn = MutableStateFlow(prefs.getBoolean("telegram.loggedIn", false))
     val signedIn: StateFlow<Boolean> = _signedIn.asStateFlow()
 
-    /** The channel whose videos Home shows on every launch; 0 = none chosen yet. */
-    private val _defaultChatId = MutableStateFlow(prefs.getLong("default.chat", 0L))
-    val defaultChatId: StateFlow<Long> = _defaultChatId.asStateFlow()
+    /** The channels whose videos Home shows on every launch (starred in Library); empty = none chosen yet. */
+    private val _homeChatIds = MutableStateFlow(loadHomeChats())
+    val homeChatIds: StateFlow<List<Long>> = _homeChatIds.asStateFlow()
 
-    fun setDefaultChat(chatId: Long) {
-        _defaultChatId.value = chatId
-        prefs.edit().putLong("default.chat", chatId).apply()
+    private fun loadHomeChats(): List<Long> {
+        val saved = prefs.getString("home.chats", null)
+        if (saved != null) return saved.split(',').mapNotNull { it.toLongOrNull() }
+        // Older versions kept a single default channel.
+        return prefs.getLong("default.chat", 0L).takeIf { it != 0L }?.let { listOf(it) } ?: emptyList()
+    }
+
+    /** Adds the channel to Home, or takes it off again. */
+    fun toggleHomeChat(chatId: Long) {
+        val next = if (chatId in _homeChatIds.value) _homeChatIds.value - chatId else _homeChatIds.value + chatId
+        _homeChatIds.value = next
+        prefs.edit().putString("home.chats", next.joinToString(",")).remove("default.chat").apply()
     }
 
     private val _userProfile = MutableStateFlow<TelegramUserProfile?>(null)
@@ -928,8 +937,9 @@ class TelegramManager(private val context: Context) {
             .remove("user.name")
             .remove("telegram.loggedIn")
             .remove("default.chat")
+            .remove("home.chats")
             .apply()
-        _defaultChatId.value = 0L
+        _homeChatIds.value = emptyList()
         tdClient?.send(TdApi.LogOut()) { }
         loggedIn = false
         _userProfile.value = null

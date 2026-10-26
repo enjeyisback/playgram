@@ -64,34 +64,71 @@ fun HomeScreen(
     val history by PlaygramApp.instance.database.watchPositionDao().getAllWatchHistory().collectAsState(initial = emptyList())
     val continueWatching = history.filter { !it.completed && it.positionMs > 0 }.take(10)
     var channelQuery by remember { mutableStateOf("") }
-    val defaultChatId by telegramManager.defaultChatId.collectAsState()
-    val defaultChat = chats.find { it.id == defaultChatId }
-    val channelMessages by remember(defaultChatId) { telegramManager.messages(defaultChatId) }.collectAsState()
-    // Typing searches Telegram's whole history of the channel, not just what is loaded on screen.
+    val homeChatIds by telegramManager.homeChatIds.collectAsState()
+    val homeChats = homeChatIds.mapNotNull { id -> chats.find { it.id == id } }
+    val channelMessages by remember(homeChatIds) {
+        if (homeChatIds.isEmpty()) kotlinx.coroutines.flow.flowOf(emptyList())
+        else kotlinx.coroutines.flow.combine(homeChatIds.map { telegramManager.messages(it) }) { lists -> lists.flatMap { it } }
+    }.collectAsState(initial = emptyList())
+
+    // Which starred channel is shown (0 = all of them) and the filter chips.
+    var selectedChat by remember { mutableStateOf(0L) }
+    if (selectedChat != 0L && selectedChat !in homeChatIds) selectedChat = 0L
+    val shownChatIds = if (selectedChat != 0L) listOf(selectedChat) else homeChatIds
+    var qualityFilter by remember { mutableStateOf<String?>(null) }
+    var formatFilter by remember { mutableStateOf<String?>(null) }
+    var sizeFilter by remember { mutableStateOf<Int?>(null) }
+
+    // "New" = posted after the previous visit ended.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val sinceMs = remember { HomeVisit.baseline(context) }
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) HomeVisit.visitEnded(context)
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // Typing searches Telegram's whole history of the shown channels, not just what is loaded on screen.
     val q = channelQuery.trim()
-    var serverHits by remember(defaultChatId) { mutableStateOf<List<MediaItem>>(emptyList()) }
+    var serverHits by remember(shownChatIds) { mutableStateOf<List<HomeVideo>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
-    LaunchedEffect(q, defaultChatId) {
+    LaunchedEffect(q, shownChatIds) {
         if (q.isEmpty()) { serverHits = emptyList(); searching = false; return@LaunchedEffect }
         searching = true
         delay(400)
-        val found = kotlinx.coroutines.suspendCancellableCoroutine<List<app.playgram.core.model.TelegramMessage>> { cont ->
-            telegramManager.searchVideos(defaultChatId, q) { if (cont.isActive) cont.resume(it) {} }
+        val found = shownChatIds.flatMap { chatId ->
+            kotlinx.coroutines.suspendCancellableCoroutine<List<app.playgram.core.model.TelegramMessage>> { cont ->
+                telegramManager.searchVideos(chatId, q) { if (cont.isActive) cont.resume(it) {} }
+            }
         }
-        serverHits = found.mapNotNull { it.media }
+        serverHits = found.mapNotNull { m -> m.media?.let { HomeVideo(it, m.dateMs, m.chatId) } }
         searching = false
     }
     // Newest first, videos only, in rows of two.
-    val videoRows = remember(channelMessages, q, serverHits) {
-        val all = channelMessages.mapNotNull { it.media }.reversed()
-        val shown = if (q.isEmpty()) all else {
+    val allVideos = remember(channelMessages, q, serverHits, selectedChat) {
+        val loaded = channelMessages.filter { selectedChat == 0L || it.chatId == selectedChat }
+            .mapNotNull { m -> m.media?.let { HomeVideo(it, m.dateMs, m.chatId) } }
+        val base = if (q.isEmpty()) loaded else {
             val words = searchKey(q).split(' ').filter { it.isNotEmpty() }
             // Telegram's search is fuzzy (it also matches captions and unrelated text); keep only real title matches.
-            val matches = { m: MediaItem -> val t = searchKey(m.title); words.all { t.contains(it) } }
-            (all.filter(matches) + serverHits.filter(matches)).distinctBy { it.id }.sortedByDescending { it.id.substringAfterLast('_').toLongOrNull() ?: 0L }
+            val matches = { v: HomeVideo -> val t = searchKey(v.media.title); words.all { t.contains(it) } }
+            (loaded.filter(matches) + serverHits.filter(matches)).distinctBy { it.media.id }
         }
-        shown.chunked(2)
+        base.sortedByDescending { it.dateMs }
     }
+    val qualityOptions = remember(allVideos) { allVideos.map { qualityOf(it.media) }.distinct().sortedBy { QUALITY_ORDER.indexOf(it).let { i -> if (i < 0) 99 else i } } }
+    val formatOptions = remember(allVideos) { allVideos.map { formatOf(it.media) }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.map { it.key } }
+    val videoRows = remember(allVideos, qualityFilter, formatFilter, sizeFilter) {
+        allVideos.filter { v ->
+            (qualityFilter == null || qualityOf(v.media) == qualityFilter) &&
+                (formatFilter == null || formatOf(v.media) == formatFilter) &&
+                (sizeFilter == null || sizeBucket(v.media.sizeBytes) == sizeFilter)
+        }.chunked(2)
+    }
+    val filtersActive = qualityFilter != null || formatFilter != null || sizeFilter != null
     val listState = rememberLazyListState()
     LaunchedEffect(scrollToTop) { if (scrollToTop > 0) listState.animateScrollToItem(0) }
 
@@ -265,7 +302,7 @@ fun HomeScreen(
             }
         }
 
-        // Videos of the default channel
+        // Videos of the starred channels
         item {
             Row(
                 modifier = Modifier
@@ -275,7 +312,11 @@ fun HomeScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    defaultChat?.title ?: "Your channel",
+                    when {
+                        homeChats.isEmpty() -> "Your channel"
+                        homeChats.size == 1 -> homeChats.first().title
+                        else -> "Your channels"
+                    },
                     modifier = Modifier.weight(1f),
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Light,
@@ -284,7 +325,7 @@ fun HomeScreen(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    if (defaultChat == null) "Choose" else "Change",
+                    if (homeChats.isEmpty()) "Choose" else "Change",
                     fontSize = 14.sp,
                     color = AccentBlueLight,
                     modifier = Modifier.clickable { onNavigate(NavRoutes.LIBRARY) }.padding(start = 12.dp)
@@ -292,31 +333,54 @@ fun HomeScreen(
             }
         }
 
-        if (defaultChat == null) item {
+        if (homeChats.isEmpty()) item {
             Text(
-                "Pick a default channel in Library → Channels (tap the star). Its videos will show here every time you open the app.",
+                "Pick channels in Library → Channels (tap the star). Their videos will show here every time you open the app.",
                 fontSize = 15.sp, fontWeight = FontWeight.Light, color = colors.textSecondary,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
             )
         } else {
+            // Channel chips (only with more than one channel) and filter chips.
+            if (homeChats.size > 1) item {
+                LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 8.dp)) {
+                    item { app.playgram.core.design.KinoPill("All channels", selectedChat == 0L, { selectedChat = 0L }) }
+                    items(homeChats, key = { it.id }) { c ->
+                        app.playgram.core.design.KinoPill(c.title.take(22), selectedChat == c.id, { selectedChat = if (selectedChat == c.id) 0L else c.id })
+                    }
+                }
+            }
+            if (allVideos.isNotEmpty()) item {
+                LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 6.dp)) {
+                    if (filtersActive) item {
+                        app.playgram.core.design.KinoPill("Clear", false, { qualityFilter = null; formatFilter = null; sizeFilter = null })
+                    }
+                    items(qualityOptions) { o -> app.playgram.core.design.KinoPill(o, qualityFilter == o, { qualityFilter = if (qualityFilter == o) null else o }) }
+                    items(formatOptions) { o -> app.playgram.core.design.KinoPill(o, formatFilter == o, { formatFilter = if (formatFilter == o) null else o }) }
+                    items(SIZE_LABELS.indices.toList()) { i -> app.playgram.core.design.KinoPill(SIZE_LABELS[i], sizeFilter == i, { sizeFilter = if (sizeFilter == i) null else i }) }
+                }
+            }
             itemsIndexed(videoRows) { index, row ->
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    row.forEach { m ->
-                        VideoGridCard(m, Modifier.weight(1f)) { onNavigate(NavRoutes.player(m.streamUrl, m.title)) }
+                    row.forEach { v ->
+                        VideoGridCard(v.media, sinceMs > 0 && v.dateMs * 1L > sinceMs, Modifier.weight(1f)) { onNavigate(NavRoutes.player(v.media.streamUrl, v.media.title)) }
                     }
                     if (row.size == 1) Spacer(Modifier.weight(1f))
                 }
                 // Reached the end: fetch older messages (stops by itself when there are no more).
                 if (index == videoRows.lastIndex) {
-                    LaunchedEffect(channelMessages.size) { telegramManager.loadOlder(defaultChatId) }
+                    LaunchedEffect(channelMessages.size) { shownChatIds.forEach { telegramManager.loadOlder(it) } }
                 }
             }
             if (videoRows.isEmpty()) item {
                 Text(
-                    if (channelQuery.isNotBlank()) (if (searching) "Searching…" else "No video named \"${channelQuery.trim()}\"") else "Loading videos…",
+                    when {
+                        channelQuery.isNotBlank() -> if (searching) "Searching…" else "No video named \"${channelQuery.trim()}\""
+                        filtersActive && allVideos.isNotEmpty() -> "No loaded video matches these filters. Scroll down to load more, or clear a filter."
+                        else -> "Loading videos…"
+                    },
                     fontSize = 15.sp, fontWeight = FontWeight.Light, color = colors.textSecondary,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
                 )
@@ -329,6 +393,74 @@ fun HomeScreen(
             onDismiss = { showLoginDialog = false },
             onLoginSuccess = { showLoginDialog = false }
         )
+    }
+}
+
+private data class HomeVideo(val media: MediaItem, val dateMs: Long, val chatId: Long)
+
+private val QUALITY_ORDER = listOf("4K", "1080p", "720p", "480p", "Other")
+private val SIZE_LABELS = listOf("< 1 GB", "1–3 GB", "> 3 GB")
+
+/**
+ * Resolution of a video. The file name's "2160p/1080p/720p/480p" is the most reliable; otherwise the picture's
+ * width (heights shrink in letterboxed films); "4K"/"UHD" in a name is only the last resort because it shows
+ * up in names of smaller files too.
+ */
+private fun qualityOf(m: MediaItem): String {
+    val t = m.title.lowercase()
+    // "1080p", "1080i" or a bare "1080_2" all count; the digits must not be part of a longer number.
+    Regex("(?<!\\d)(2160|1080|720|576|540|480)(?!\\d)").find(t)?.let {
+        return when (it.groupValues[1]) { "2160" -> "4K"; "1080" -> "1080p"; "720" -> "720p"; else -> "480p" }
+    }
+    val width = m.resolution.substringBefore('x').toIntOrNull() ?: 0
+    return when {
+        width >= 3000 -> "4K"
+        width >= 1800 -> "1080p"
+        width >= 1200 -> "720p"
+        width >= 600 -> "480p"
+        Regex("\\b4k\\b|\\buhd\\b").containsMatchIn(t) -> "4K"
+        else -> "Other"
+    }
+}
+
+private fun formatOf(m: MediaItem): String {
+    val ext = m.title.substringAfterLast('.', "").lowercase()
+    return when {
+        ext in setOf("mkv", "mp4", "avi", "mov", "webm", "ts", "m4v") -> ext.uppercase()
+        m.mimeType.contains("matroska") -> "MKV"
+        m.mimeType.contains("mp4") -> "MP4"
+        else -> "Other"
+    }
+}
+
+private fun sizeBucket(bytes: Long): Int = when {
+    bytes < 1L shl 30 -> 0
+    bytes < 3L shl 30 -> 1
+    else -> 2
+}
+
+/**
+ * Remembers when the previous visit ended so Home can mark newer posts. The baseline is fixed for a visit and
+ * moves forward when the app was away for a while (or on a fresh start).
+ */
+private object HomeVisit {
+    private const val AWAY_MS = 30 * 60 * 1000L
+    private var baseline: Long? = null
+    private var stoppedAt = 0L
+
+    fun baseline(context: android.content.Context): Long {
+        val prefs = context.getSharedPreferences("playgram.home", android.content.Context.MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+        if (baseline == null || (stoppedAt > 0 && now - stoppedAt > AWAY_MS)) {
+            baseline = prefs.getLong("last_visit_end", 0L)
+            stoppedAt = 0L
+        }
+        return baseline ?: 0L
+    }
+
+    fun visitEnded(context: android.content.Context) {
+        stoppedAt = System.currentTimeMillis()
+        context.getSharedPreferences("playgram.home", android.content.Context.MODE_PRIVATE).edit().putLong("last_visit_end", stoppedAt).apply()
     }
 }
 
@@ -501,7 +633,7 @@ fun ChannelFeedRow(
 
 /** One video in the two-column grid on Home. */
 @Composable
-private fun VideoGridCard(media: MediaItem, modifier: Modifier, onClick: () -> Unit) {
+private fun VideoGridCard(media: MediaItem, isNew: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val colors = LocalPlaygramColors.current
     Column(modifier.clickable(onClick = onClick)) {
         Box(
@@ -519,6 +651,16 @@ private fun VideoGridCard(media: MediaItem, modifier: Modifier, onClick: () -> U
                 Modifier.size(36.dp).clip(CircleShape).background(Color(0x99111A1A)),
                 contentAlignment = Alignment.Center
             ) { Icon(Icons.Outlined.PlayArrow, null, tint = Color.White, modifier = Modifier.size(22.dp)) }
+            if (isNew) Text(
+                "NEW",
+                fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(6.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color(0xFF2E7DD7))
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            )
             Text(
                 media.formattedDuration,
                 fontSize = 11.sp, color = Color.White,

@@ -108,7 +108,7 @@ private fun LibraryScreenContent(
     val q = query.trim()
     val shownFiles = saved.filter { q.isEmpty() || it.name.contains(q, ignoreCase = true) }
     val chats by app.telegramManager.chats.collectAsState()
-    val defaultChatId by app.telegramManager.defaultChatId.collectAsState()
+    val homeChatIds by app.telegramManager.homeChatIds.collectAsState()
     val shownChats = chats.filter { q.isEmpty() || it.title.contains(q, ignoreCase = true) }
     val shownHistory = history.filter { q.isEmpty() || it.title.contains(q, ignoreCase = true) }
 
@@ -187,7 +187,7 @@ private fun LibraryScreenContent(
         } else if (tab == 2) {
             item {
                 Text(
-                    "Tap the star to show a channel's videos on Home every time you open the app.",
+                    "Tap the star to show a channel's videos on Home. You can star more than one.",
                     fontSize = 13.sp, fontWeight = FontWeight.Light, color = colors.textSecondary,
                     modifier = Modifier.padding(bottom = 6.dp)
                 )
@@ -196,15 +196,15 @@ private fun LibraryScreenContent(
                 EmptyState(if (q.isEmpty()) "No channels yet" else "Nothing matches", if (q.isEmpty()) "Channels and groups from your Telegram account show up here." else "Try a different word.")
             }
             items(shownChats, key = { it.id }) { chat ->
-                val isDefault = chat.id == defaultChatId
+                val isDefault = chat.id in homeChatIds
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.weight(1f)) {
                         ChannelFeedRow(chat = chat, onClick = { onNavigate(NavRoutes.chatDetail(chat.id)) })
                     }
-                    IconButton(onClick = { app.telegramManager.setDefaultChat(if (isDefault) 0L else chat.id) }) {
+                    IconButton(onClick = { app.telegramManager.toggleHomeChat(chat.id) }) {
                         Icon(
                             if (isDefault) Icons.Outlined.Star else Icons.Outlined.StarBorder,
-                            if (isDefault) "Default channel" else "Make default channel",
+                            if (isDefault) "Shown on Home" else "Show on Home",
                             tint = if (isDefault) AccentBlueLight else colors.textSecondary
                         )
                     }

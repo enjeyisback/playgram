@@ -155,9 +155,6 @@ private fun ChatDetailScreenContent(
                     fontSize = 13.sp, fontWeight = FontWeight.Light, color = colors.textSecondary
                 )
             }
-            IconButton(onClick = { onNavigate(NavRoutes.bulk(chatId)) }) {
-                Icon(Icons.Outlined.GridView, "Bulk job", tint = colors.textPrimary)
-            }
             IconButton(onClick = { searchOpen = true }) {
                 Icon(Icons.Outlined.Search, "Search", tint = colors.textPrimary)
             }

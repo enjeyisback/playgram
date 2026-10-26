@@ -16,22 +16,15 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.*
 import androidx.navigation.navArgument
 import app.playgram.core.design.LocalPlaygramColors
-import app.playgram.feature.automation.AutomationScreen
-import app.playgram.feature.browser.BrowserScreen
-import app.playgram.feature.bulk.BulkScreen
 import app.playgram.feature.chats.ChatDetailScreen
-import app.playgram.feature.chats.ChatsScreen
-import app.playgram.feature.devices.DevicesScreen
 import app.playgram.feature.downloads.DownloadsScreen
 import app.playgram.feature.home.HomeScreen
 import app.playgram.feature.library.LibraryScreen
 import app.playgram.feature.player.PlayerScreen
-import app.playgram.feature.pro.ProScreen
 import app.playgram.feature.tools.ToolsScreen
 
 sealed class BottomNavItem(val route: String, val title: String, val icon: ImageVector) {
     object Home : BottomNavItem(NavRoutes.HOME, "Home", Icons.Outlined.Home)
-    object Chats : BottomNavItem(NavRoutes.CHATS, "Chats", Icons.Outlined.ChatBubbleOutline)
     object Downloads : BottomNavItem(NavRoutes.DOWNLOADS, "Downloads", Icons.Outlined.FileDownload)
     object Library : BottomNavItem(NavRoutes.LIBRARY, "Library", Icons.Outlined.VideoLibrary)
     object Settings : BottomNavItem(NavRoutes.SETTINGS, "Settings", Icons.Outlined.Settings)
@@ -118,10 +111,6 @@ fun PlaygramNavigation() {
                 HomeScreen(onNavigate = { route -> navController.navigate(route) }, scrollToTop = homeScrollTop)
             }
 
-            composable(NavRoutes.CHATS) {
-                ChatsScreen(onNavigate = { route -> navController.navigate(route) })
-            }
-
             composable(
                 route = NavRoutes.CHAT_DETAIL,
                 arguments = listOf(navArgument("chatId") { type = NavType.LongType })
@@ -144,63 +133,6 @@ fun PlaygramNavigation() {
 
             composable(NavRoutes.SETTINGS) {
                 ToolsScreen(onBack = null, onNavigate = { route -> navController.navigate(route) })
-            }
-
-            composable(NavRoutes.DEVICES) {
-                DevicesScreen(onNavigate = { route -> navController.navigate(route) })
-            }
-
-            composable(
-                route = NavRoutes.BROWSER,
-                arguments = listOf(navArgument("url") {
-                    type = NavType.StringType
-                    defaultValue = "https://google.com"
-                })
-            ) { backStack ->
-                val url = backStack.arguments?.getString("url") ?: "https://google.com"
-                BrowserScreen(
-                    initialUrl = url,
-                    onBack = { navController.popBackStack() },
-                    onNavigate = { route -> navController.navigate(route) }
-                )
-            }
-
-            composable(
-                route = NavRoutes.TOOLS,
-                arguments = listOf(navArgument("link") {
-                    type = NavType.StringType
-                    defaultValue = ""
-                })
-            ) { backStack ->
-                val link = backStack.arguments?.getString("link") ?: ""
-                ToolsScreen(
-                    initialLink = link,
-                    onBack = { navController.popBackStack() },
-                    onNavigate = { route -> navController.navigate(route) }
-                )
-            }
-
-            composable(NavRoutes.AUTOMATION) {
-                AutomationScreen(onBack = { navController.popBackStack() })
-            }
-
-            composable(
-                route = NavRoutes.BULK,
-                arguments = listOf(navArgument("chatId") {
-                    type = NavType.LongType
-                    defaultValue = 0L
-                })
-            ) { backStack ->
-                val chatId = backStack.arguments?.getLong("chatId") ?: 0L
-                BulkScreen(
-                    chatId = chatId,
-                    onBack = { navController.popBackStack() },
-                    onNavigate = { route -> navController.navigate(route) }
-                )
-            }
-
-            composable(NavRoutes.PRO) {
-                ProScreen(onBack = { navController.popBackStack() })
             }
 
             composable(

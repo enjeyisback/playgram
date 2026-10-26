@@ -306,7 +306,10 @@ private fun PlayerScreenContent(
             exoPlayer.videoFormat?.let { videoCodec = videoCodecName(it.sampleMimeType) ?: videoCodecName(it.codecs?.let { c -> if (c.startsWith("avc")) "video/avc" else if (c.startsWith("hev") || c.startsWith("hvc")) "video/hevc" else null }) }
             exoPlayer.audioFormat?.let { audioCodec = audioCodecName(it.sampleMimeType) }
             duration = exoPlayer.duration.coerceAtLeast(1L)
-            exoPlayer.videoFormat?.bitrate?.takeIf { it > 0 }?.let { bitrate = String.format("%.1f Mb/s", it / 1_000_000.0) }
+            // MKV streams usually report no bitrate; file size over duration is the average for the whole file.
+            val avg = exoPlayer.videoFormat?.let { if (it.averageBitrate > 0) it.averageBitrate else it.bitrate }?.takeIf { it > 0 }?.toDouble()
+                ?: if (fileSize > 0 && exoPlayer.duration > 1_000) fileSize * 8.0 / (exoPlayer.duration / 1000.0) else null
+            avg?.let { bitrate = String.format("%.1f Mb/s", it / 1_000_000.0) }
             delay(500)
         }
     }
