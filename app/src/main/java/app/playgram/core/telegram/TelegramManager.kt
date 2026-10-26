@@ -493,6 +493,80 @@ class TelegramManager(private val context: Context) {
         variants.forEach { q -> filters.forEach { f -> page(q, f, 0L, 5) } }
     }
 
+    private fun isVideoMessage(m: TdApi.Message): Boolean = when (val c = m.content) {
+        is TdApi.MessageVideo -> true
+        is TdApi.MessageDocument -> mediaOf(m.chatId, m) != null
+        else -> false
+    }
+
+    /** The next video posted after [msgId] in the same chat (the next episode), or null when there is none. */
+    fun nextVideoAfter(chatId: Long, msgId: Long, onResult: (MediaItem?) -> Unit) {
+        val c = tdClient
+        if (!loggedIn || c == null) { onResult(null); return }
+        // A negative offset reads towards newer messages; the page comes back newest first.
+        c.send(TdApi.GetChatHistory(chatId, msgId, -49, 50, false)) { res ->
+            val next = (res as? TdApi.Messages)?.messages.orEmpty()
+                .filter { it.id > msgId && isVideoMessage(it) }
+                .minByOrNull { it.id }
+            onResult(next?.let { mediaOf(chatId, it) })
+        }
+    }
+
+    /** A subtitle file posted in a chat. */
+    data class SubtitleFile(val name: String, val fileId: Int)
+
+    /** Subtitle documents (.srt/.vtt/.ass) posted around a video, and ones named like it; name matches first. */
+    fun findSubtitles(chatId: Long, msgId: Long, videoTitle: String, onResult: (List<SubtitleFile>) -> Unit) {
+        val c = tdClient
+        if (!loggedIn || c == null) { onResult(emptyList()); return }
+        val ext = Regex(".*\\.(srt|vtt|ass|ssa)$", RegexOption.IGNORE_CASE)
+        val base = videoTitle.substringBeforeLast('.').lowercase()
+        val found = ConcurrentHashMap<Long, TdApi.Message>()
+        val pending = java.util.concurrent.atomic.AtomicInteger(2)
+        fun done() {
+            if (pending.decrementAndGet() != 0) return
+            val subs = found.values.mapNotNull { m ->
+                val d = (m.content as? TdApi.MessageDocument)?.document ?: return@mapNotNull null
+                if (ext.matches(d.fileName.orEmpty())) SubtitleFile(d.fileName, d.document.id) to m.id else null
+            }
+            val sorted = subs.sortedWith(compareBy({ !it.first.name.lowercase().startsWith(base.take(20)) }, { Math.abs(it.second - msgId) }))
+            onResult(sorted.map { it.first }.distinctBy { it.name }.take(12))
+        }
+        c.send(TdApi.GetChatHistory(chatId, msgId, -15, 30, false)) { res ->
+            (res as? TdApi.Messages)?.messages?.forEach { found[it.id] = it }
+            done()
+        }
+        val query = base.replace('_', ' ').replace('.', ' ').trim().take(40)
+        if (query.isBlank()) done()
+        else c.send(TdApi.SearchChatMessages(chatId, null, query, null, 0, 0, 30, TdApi.SearchMessagesFilterDocument())) { res ->
+            (res as? TdApi.FoundChatMessages)?.messages?.forEach { found[it.id] = it }
+            done()
+        }
+    }
+
+    /** What a Telegram link points at. */
+    sealed class LinkTarget {
+        data class Video(val media: MediaItem) : LinkTarget()
+        data class Chat(val chatId: Long) : LinkTarget()
+        object None : LinkTarget()
+    }
+
+    /** Resolves a t.me link (message in a channel, or a channel itself) through TDLib. */
+    fun resolveLink(url: String, onResult: (LinkTarget) -> Unit) {
+        val c = tdClient
+        if (!loggedIn || c == null) { onResult(LinkTarget.None); return }
+        c.send(TdApi.GetMessageLinkInfo(url)) { res ->
+            val info = res as? TdApi.MessageLinkInfo
+            val msg = info?.message
+            val media = msg?.let { mediaOf(it.chatId, it) }
+            onResult(when {
+                media != null -> LinkTarget.Video(media)
+                info != null && info.chatId != 0L && msg == null -> LinkTarget.Chat(info.chatId)
+                else -> LinkTarget.None
+            })
+        }
+    }
+
     private fun textOf(content: TdApi.MessageContent): String = when (content) {
         is TdApi.MessageText -> content.text.text
         is TdApi.MessageVideo -> content.caption.text

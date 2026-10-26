@@ -60,6 +60,32 @@ fun PlaygramNavigation() {
 
     var homeScrollTop by remember { mutableStateOf(0) }
 
+    // Share sheet / t.me links / video files handed to the app (see Incoming).
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val incoming by app.playgram.Incoming.pending.collectAsState()
+    LaunchedEffect(incoming) {
+        val request = incoming ?: return@LaunchedEffect
+        app.playgram.Incoming.pending.value = null
+        when (request) {
+            is app.playgram.IncomingRequest.VideoUri -> navController.navigate(NavRoutes.player(request.uri, request.title))
+            is app.playgram.IncomingRequest.TelegramLink -> {
+                android.widget.Toast.makeText(context, "Opening link…", android.widget.Toast.LENGTH_SHORT).show()
+                app.playgram.PlaygramApp.instance.telegramManager.resolveLink(request.url) { target ->
+                    // TDLib answers on its own thread.
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        when (target) {
+                            is app.playgram.core.telegram.TelegramManager.LinkTarget.Video ->
+                                navController.navigate(NavRoutes.player(target.media.streamUrl, target.media.title))
+                            is app.playgram.core.telegram.TelegramManager.LinkTarget.Chat ->
+                                navController.navigate(NavRoutes.chatDetail(target.chatId))
+                            else -> android.widget.Toast.makeText(context, "No video found in that link.", android.widget.Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     Scaffold(
         bottomBar = {
             if (showBottomBar) {

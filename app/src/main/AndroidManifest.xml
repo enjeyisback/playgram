@@ -111,27 +111,9 @@
                 <data android:scheme="playgram" android:host="play" />
                 <data android:scheme="playgram" android:host="link" />
             </intent-filter>
-
-            <intent-filter>
-                <action android:name="android.intent.action.SEND" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="text/plain" />
-            </intent-filter>
         </activity>
 
-        <!-- Share Target Aliases -->
-        <activity-alias
-            android:name=".DownloadWithPlaygram"
-            android:exported="true"
-            android:icon="@mipmap/ic_launcher"
-            android:label="@string/download_share_target"
-            android:targetActivity=".MainActivity">
-            <intent-filter>
-                <action android:name="android.intent.action.SEND" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="text/plain" />
-            </intent-filter>
-        </activity-alias>
+        <!-- Share target: "Play in Playgram" -->
 
         <activity-alias
             android:name=".PlayInPlaygram"
@@ -144,19 +126,6 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
                 <data android:mimeType="video/*" />
-            </intent-filter>
-        </activity-alias>
-
-        <activity-alias
-            android:name=".OpenInBrowser"
-            android:exported="true"
-            android:icon="@mipmap/ic_launcher"
-            android:label="@string/browser_share_target"
-            android:targetActivity=".MainActivity">
-            <intent-filter>
-                <action android:name="android.intent.action.SEND" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="text/plain" />
             </intent-filter>
         </activity-alias>
 

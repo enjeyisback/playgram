@@ -33,6 +33,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.media3.common.C
+import androidx.media3.common.Format
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.MimeTypes
+import app.playgram.core.telegram.TelegramManager
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -102,7 +108,16 @@ fun PlayerScreen(
     if (external != null && !handoffFailed) {
         ExternalHandoff(external, videoUrl, videoTitle, onBack, onFailed = { handoffFailed = true })
     } else {
-        app.playgram.core.design.KinoScaled { PlayerScreenContent(videoUrl = videoUrl, videoTitle = videoTitle, onBack = onBack) }
+        // Next episode swaps the video in place (keeping fullscreen) instead of stacking screens.
+        var current by remember { mutableStateOf(Triple(videoUrl, videoTitle, false)) }
+        key(current.first) {
+            app.playgram.core.design.KinoScaled {
+                PlayerScreenContent(
+                    videoUrl = current.first, videoTitle = current.second, startFullscreen = current.third, onBack = onBack,
+                    onPlayNext = { url, title, fs -> current = Triple(url, title, fs) }
+                )
+            }
+        }
     }
 }
 
@@ -138,7 +153,9 @@ private fun ExternalHandoff(player: ExternalPlayer, videoUrl: String, videoTitle
 private fun PlayerScreenContent(
     videoUrl: String,
     videoTitle: String,
-    onBack: () -> Unit
+    startFullscreen: Boolean,
+    onBack: () -> Unit,
+    onPlayNext: (url: String, title: String, fullscreen: Boolean) -> Unit
 ) {
     val context = LocalContext.current
     val activity = context as? Activity
@@ -159,7 +176,7 @@ private fun PlayerScreenContent(
         if (videoUrl.startsWith("tg://")) {
             builder.setMediaSourceFactory(
                 androidx.media3.exoplayer.source.DefaultMediaSourceFactory(context)
-                    .setDataSourceFactory(app.playgram.core.telegram.TdFileDataSource.Factory(PlaygramApp.instance.telegramManager, streamSession))
+                    .setDataSourceFactory(androidx.media3.datasource.DefaultDataSource.Factory(context, app.playgram.core.telegram.TdFileDataSource.Factory(PlaygramApp.instance.telegramManager, streamSession)))
             )
         }
         builder.build().apply {
@@ -175,13 +192,25 @@ private fun PlayerScreenContent(
     var controlsVisible by remember { mutableStateOf(true) }
     var playbackSpeed by remember { mutableStateOf(1.0f) }
     var showTrackSheet by remember { mutableStateOf(false) }
+    var tracks by remember { mutableStateOf(exoPlayer.currentTracks) }
+    var subFiles by remember { mutableStateOf<List<TelegramManager.SubtitleFile>>(emptyList()) }
+    var subStatus by remember { mutableStateOf<String?>(null) }
+    var nextItem by remember { mutableStateOf<app.playgram.core.model.MediaItem?>(null) }
+    var countdown by remember { mutableStateOf<Int?>(null) }
+    var seekFlash by remember { mutableStateOf<String?>(null) }
+    var boosted by remember { mutableStateOf(false) }
+    val chatAndMsg = remember(videoUrl) {
+        val u = Uri.parse(videoUrl)
+        val chat = u.getQueryParameter("chat")?.toLongOrNull(); val msg = u.getQueryParameter("msg")?.toLongOrNull()
+        if (videoUrl.startsWith("tg://") && chat != null && msg != null) chat to msg else null
+    }
     var fullscreen by remember { mutableStateOf(false) }
     var pictureMode by remember { mutableStateOf(pictureModes.indexOf(prefs.getString("picture_size", "Fit")).coerceAtLeast(0)) }
     // Streams are not kept unless asked: 0 discard, 1 seven days, 2 keep, 3 save to Downloads.
     var keepMode by remember { mutableStateOf(0) }
     var bitrate by remember { mutableStateOf("—") }
     var resolution by remember { mutableStateOf("") }
-    var savedMsg by remember { mutableStateOf<String?>(if (videoUrl.startsWith("/")) "Playing the saved file." else null) }
+    var savedMsg by remember { mutableStateOf<String?>(if (videoUrl.startsWith("/") || videoUrl.startsWith("content:")) "Playing the saved file." else null) }
     var videoCodec by remember { mutableStateOf<String?>(null) }
     var audioCodec by remember { mutableStateOf<String?>(null) }
     var fileSize by remember { mutableStateOf(if (videoUrl.startsWith("/")) java.io.File(videoUrl).length() else 0L) }
@@ -198,7 +227,7 @@ private fun PlayerScreenContent(
     var handedOff by remember { mutableStateOf(false) }
     var buffering by remember { mutableStateOf(true) }
     var playError by remember { mutableStateOf<String?>(null) }
-    val isLocalFile = videoUrl.startsWith("/")
+    val isLocalFile = videoUrl.startsWith("/") || videoUrl.startsWith("content:")
 
     val watchDao = remember { PlaygramApp.instance.database.watchPositionDao() }
     fun saveProgress() {
@@ -215,6 +244,22 @@ private fun PlayerScreenContent(
             override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                 android.util.Log.e("PlaygramPlayer", "Playback failed", error)
+                // The phone has no audio output (AudioTrack can't be created): keep the picture instead of giving up.
+                if (generateSequence<Throwable>(error) { it.cause }.any { it is androidx.media3.exoplayer.audio.AudioSink.InitializationException }) {
+                    exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true).build()
+                    exoPlayer.prepare()
+                    exoPlayer.play()
+                    savedMsg = "This phone's audio output isn't available, so the video plays without sound."
+                    return
+                }
+                // Some MKVs end in zero padding the extractor rejects; failing in the last seconds is the end of the video.
+                val dur = exoPlayer.duration
+                if (dur > 0 && exoPlayer.currentPosition >= dur - 20_000) {
+                    buffering = false
+                    if (nextItem != null && prefs.getBoolean("autoplay", true)) countdown = 5
+                    else controlsVisible = true
+                    return
+                }
                 playError = when (error.cause) {
                     is androidx.media3.exoplayer.source.UnrecognizedInputFormatException -> "The file's format isn't supported, or the file is damaged."
                     else -> error.cause?.message ?: error.errorCodeName
@@ -223,6 +268,8 @@ private fun PlayerScreenContent(
             }
             override fun onPlaybackStateChanged(state: Int) {
                 buffering = state == Player.STATE_BUFFERING
+                // Next episode: the "Auto-play next video" setting starts a countdown when this one ends.
+                if (state == Player.STATE_ENDED && nextItem != null && prefs.getBoolean("autoplay", true)) countdown = 5
                 if (state == Player.STATE_READY) playError = null
             if (state == Player.STATE_READY) duration = exoPlayer.duration.coerceAtLeast(1L)
             }
@@ -230,7 +277,8 @@ private fun PlayerScreenContent(
                 if (size.height > 0) resolution = "${size.height}p"
                 if (size.width > 0 && size.height > 0) app.playgram.core.player.PipState.ratio = size.width * size.pixelWidthHeightRatio / size.height
             }
-            override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+            override fun onTracksChanged(newTracks: androidx.media3.common.Tracks) {
+                tracks = newTracks
                 videoCodec = videoCodecName(exoPlayer.videoFormat?.sampleMimeType)
                 audioCodec = audioCodecName(exoPlayer.audioFormat?.sampleMimeType)
             }
@@ -262,6 +310,20 @@ private fun PlayerScreenContent(
             delay(500)
         }
     }
+    // Next episode in the channel, and subtitle files posted next to this video.
+    LaunchedEffect(chatAndMsg) {
+        chatAndMsg?.let { (chat, msg) ->
+            PlaygramApp.instance.telegramManager.nextVideoAfter(chat, msg) { nextItem = it }
+        }
+    }
+    LaunchedEffect(countdown) {
+        val c = countdown ?: return@LaunchedEffect
+        val next = nextItem
+        if (next == null) { countdown = null; return@LaunchedEffect }
+        if (c <= 0) { countdown = null; onPlayNext(next.streamUrl, next.title, fullscreen) }
+        else { delay(1000); countdown = c - 1 }
+    }
+    LaunchedEffect(seekFlash) { if (seekFlash != null) { delay(700); seekFlash = null } }
     LaunchedEffect(controlsVisible, isPlaying) {
         if (controlsVisible && isPlaying) { delay(4000); controlsVisible = false }
     }
@@ -333,6 +395,12 @@ private fun PlayerScreenContent(
             if (on) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
     }
     androidx.activity.compose.BackHandler(enabled = fullscreen) { setFullscreen(false) }
+    // Settings -> "Back button enters picture-in-picture": Back while playing floats the video.
+    val pipBackPref = remember { prefs.getBoolean("pip_back", false) }
+    androidx.activity.compose.BackHandler(enabled = pipBackPref && isPlaying && !fullscreen && !inPip && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        try { activity?.enterPictureInPictureMode(pip.params(false)) } catch (_: Exception) { onBack() }
+    }
+    LaunchedEffect(Unit) { if (startFullscreen) setFullscreen(true) }
 
     fun save() {
         downloadManager.enqueueDownload(
@@ -351,8 +419,24 @@ private fun PlayerScreenContent(
         Box(
             modifier = (if (fullscreen || inPip) Modifier.fillMaxSize() else Modifier.fillMaxWidth().aspectRatio(16f / 9f))
                 .background(Color.Black)
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
-                    controlsVisible = !controlsVisible
+                .pointerInput(Unit) {
+                    // Tap = show/hide controls; double tap left/right third = -/+10 s, middle = play/pause;
+                    // press and hold = 2x speed until released.
+                    detectTapGestures(
+                        onTap = { controlsVisible = !controlsVisible },
+                        onDoubleTap = { at ->
+                            when {
+                                at.x < size.width / 3f -> { exoPlayer.seekTo((exoPlayer.currentPosition - 10_000).coerceAtLeast(0)); seekFlash = "⏪ 10 s" }
+                                at.x > size.width * 2f / 3f -> { exoPlayer.seekTo((exoPlayer.currentPosition + 10_000).coerceAtMost(exoPlayer.duration.coerceAtLeast(0))); seekFlash = "10 s ⏩" }
+                                else -> if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
+                            }
+                        },
+                        onLongPress = { if (exoPlayer.isPlaying) { boosted = true; exoPlayer.setPlaybackSpeed(2f) } },
+                        onPress = {
+                            tryAwaitRelease()
+                            if (boosted) { boosted = false; exoPlayer.setPlaybackSpeed(playbackSpeed) }
+                        }
+                    )
                 }
                 .pointerInput(Unit) {
                     var left = true
@@ -414,6 +498,40 @@ private fun PlayerScreenContent(
                     LinearProgressIndicator(progress = { gestureLevel }, modifier = Modifier.width(90.dp).height(4.dp), color = AccentBlueLight, trackColor = Color(0x55FFFFFF))
                     Spacer(Modifier.width(10.dp))
                     Text(label, fontFamily = JetBrainsMono, fontSize = 13.sp, color = Color.White)
+                }
+            }
+
+            val flashText = if (boosted) "2× speed" else seekFlash
+            flashText?.let { label ->
+                Text(
+                    label, fontSize = 15.sp, color = Color.White,
+                    modifier = Modifier
+                        .align(if (boosted) Alignment.TopCenter else when (label.firstOrNull()) { '⏪' -> Alignment.CenterStart; else -> Alignment.CenterEnd })
+                        .padding(horizontal = 28.dp, vertical = if (boosted) 24.dp else 0.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color(0xB3000000))
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                )
+            }
+
+            val cd = countdown
+            val upNext = nextItem
+            if (cd != null && upNext != null && !inPip) {
+                Column(
+                    Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(16.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(Color(0xE6000000))
+                        .padding(14.dp)
+                        .widthIn(max = 260.dp)
+                ) {
+                    Text("Next episode in $cd", fontSize = 13.sp, color = Color(0xCCFFFFFF))
+                    Text(upNext.title, fontSize = 15.sp, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+                    Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        TextButton(onClick = { countdown = null }) { Text("Cancel", color = Color.White) }
+                        TextButton(onClick = { countdown = null; onPlayNext(upNext.streamUrl, upNext.title, fullscreen) }) { Text("Play now", color = AccentBlueLight) }
+                    }
                 }
             }
 
@@ -681,27 +799,108 @@ private fun PlayerScreenContent(
         )
     }
 
+    // Subtitle files posted in the channel next to this video (looked up when the dialog opens).
+    LaunchedEffect(showTrackSheet) {
+        if (showTrackSheet && chatAndMsg != null && subFiles.isEmpty()) {
+            PlaygramApp.instance.telegramManager.findSubtitles(chatAndMsg.first, chatAndMsg.second, videoTitle) { subFiles = it }
+        }
+    }
+
+    fun selectTrack(type: Int, group: androidx.media3.common.Tracks.Group?, index: Int) {
+        val b = exoPlayer.trackSelectionParameters.buildUpon()
+        if (group == null) b.setTrackTypeDisabled(type, true)
+        else b.setTrackTypeDisabled(type, false).setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, index))
+        exoPlayer.trackSelectionParameters = b.build()
+    }
+
+    fun loadSubtitle(sub: TelegramManager.SubtitleFile) {
+        subStatus = "Loading ${sub.name}…"
+        PlaygramApp.instance.telegramManager.fetchFilePath(sub.fileId) { path ->
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                if (path == null) { subStatus = "Couldn't download ${sub.name}"; return@post }
+                val mime = when (sub.name.substringAfterLast('.').lowercase()) {
+                    "vtt" -> MimeTypes.TEXT_VTT
+                    "ass", "ssa" -> MimeTypes.TEXT_SSA
+                    else -> MimeTypes.APPLICATION_SUBRIP
+                }
+                val cfg = MediaItem.SubtitleConfiguration.Builder(Uri.fromFile(java.io.File(path)))
+                    .setMimeType(mime).setLabel(sub.name).setSelectionFlags(C.SELECTION_FLAG_DEFAULT).build()
+                val item = exoPlayer.currentMediaItem?.buildUpon()?.setSubtitleConfigurations(listOf(cfg))?.build() ?: return@post
+                val pos = exoPlayer.currentPosition
+                exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters.buildUpon()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false).clearOverridesOfType(C.TRACK_TYPE_TEXT).build()
+                // The picture restarts for a moment while the stream re-opens with the subtitle attached.
+                exoPlayer.setMediaItem(item, pos)
+                exoPlayer.prepare()
+                exoPlayer.play()
+                subStatus = "Loaded ${sub.name}"
+            }
+        }
+    }
+
     if (showTrackSheet) {
+        val audioGroups = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO && it.isSupported }
+        val textGroups = tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT && it.isSupported }
+        val textOff = exoPlayer.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT) || textGroups.none { it.isSelected }
         AlertDialog(
             onDismissRequest = { showTrackSheet = false },
             title = { Text("Audio & subtitles", fontWeight = FontWeight.Light, color = colors.textPrimary) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Audio", fontSize = 15.sp, color = colors.textSecondary)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        KinoPill("Track 1", true, {})
-                        KinoPill("Track 2", false, {})
+                    if (audioGroups.isEmpty()) Text("No separate audio tracks", fontSize = 15.sp, fontWeight = FontWeight.Light, color = colors.textSecondary)
+                    var n = 0
+                    audioGroups.forEach { g ->
+                        for (i in 0 until g.length) {
+                            n++
+                            TrackRow(trackLabel(g.getTrackFormat(i), n, true), g.isTrackSelected(i)) { selectTrack(C.TRACK_TYPE_AUDIO, g, i) }
+                        }
                     }
-                    Text("Subtitles", fontSize = 15.sp, color = colors.textSecondary)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        KinoPill("Off", true, {})
-                        KinoPill("English", false, {})
+                    Text("Subtitles", fontSize = 15.sp, color = colors.textSecondary, modifier = Modifier.padding(top = 10.dp))
+                    TrackRow("Off", textOff) { selectTrack(C.TRACK_TYPE_TEXT, null, 0) }
+                    var t = 0
+                    textGroups.forEach { g ->
+                        for (i in 0 until g.length) {
+                            t++
+                            TrackRow(trackLabel(g.getTrackFormat(i), t, false), !textOff && g.isTrackSelected(i)) { selectTrack(C.TRACK_TYPE_TEXT, g, i) }
+                        }
                     }
+                    if (subFiles.isNotEmpty()) {
+                        Text("Posted in this channel", fontSize = 15.sp, color = colors.textSecondary, modifier = Modifier.padding(top = 10.dp))
+                        subFiles.forEach { f -> TrackRow(f.name, false) { loadSubtitle(f) } }
+                    }
+                    subStatus?.let { Text(it, fontSize = 13.sp, fontWeight = FontWeight.Light, color = colors.textSecondary, modifier = Modifier.padding(top = 8.dp)) }
                 }
             },
             confirmButton = { TextButton(onClick = { showTrackSheet = false }) { Text("Close", color = AccentBlueLight) } },
             containerColor = colors.surfaceVariant
         )
+    }
+}
+
+private fun trackLabel(f: Format, number: Int, audio: Boolean): String {
+    val lang = f.language?.takeIf { it != "und" }?.let { java.util.Locale.forLanguageTag(it).displayLanguage.ifBlank { it } }
+    val name = f.label?.takeIf { it.isNotBlank() } ?: lang ?: (if (audio) "Audio $number" else "Subtitle $number")
+    val extra = if (audio) listOfNotNull(
+        audioCodecName(f.sampleMimeType),
+        when (f.channelCount) { 1 -> "mono"; 2 -> "stereo"; 6 -> "5.1"; 8 -> "7.1"; else -> null }
+    ) else emptyList()
+    return (listOf(name) + extra.filter { it.isNotBlank() && !name.contains(it, ignoreCase = true) }).joinToString(" · ")
+}
+
+@Composable
+private fun TrackRow(label: String, selected: Boolean, onClick: () -> Unit) {
+    val colors = LocalPlaygramColors.current
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick).padding(horizontal = 6.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            if (selected) Icons.Outlined.RadioButtonChecked else Icons.Outlined.RadioButtonUnchecked, null,
+            tint = if (selected) AccentBlueLight else colors.textSecondary, modifier = Modifier.size(20.dp)
+        )
+        Spacer(Modifier.width(12.dp))
+        Text(label, fontSize = 16.sp, color = colors.textPrimary, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 }
 
