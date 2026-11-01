@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -147,11 +149,13 @@ fun PlaygramNavigation() {
             ) { backStack ->
                 val url = backStack.arguments?.getString("url") ?: ""
                 val title = backStack.arguments?.getString("title") ?: "Media Player"
-                PlayerScreen(
-                    videoUrl = url,
-                    videoTitle = title,
-                    onBack = { navController.popBackStack() }
-                )
+                // The player runs in its own task (PlayerActivity) so PiP leaves this app open behind it.
+                val ctx = androidx.compose.ui.platform.LocalContext.current
+                LaunchedEffect(url) {
+                    ctx.startActivity(app.playgram.PlayerActivity.intent(ctx, url, title).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK))
+                    navController.popBackStack()
+                }
+                Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black))
             }
         }
     }

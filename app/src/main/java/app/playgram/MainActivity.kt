@@ -74,30 +74,6 @@ class MainActivity : ComponentActivity() {
         } catch (_: Throwable) {}
     }
 
-    /** Home button / recents while a video plays: float it instead of stopping it. */
-    override fun onUserLeaveHint() {
-        super.onUserLeaveHint()
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O &&
-            app.playgram.core.player.PipState.active && app.playgram.core.player.PipState.playing &&
-            app.playgram.core.player.PipState.enabledInSettings(this) && !isInPictureInPictureMode
-        ) {
-            try { enterPictureInPictureMode(app.playgram.core.player.PipState.params(false)) } catch (e: Throwable) { Log.e("MainActivity", "PiP failed", e) }
-        }
-    }
-
-    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: android.content.res.Configuration) {
-        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
-        app.playgram.core.player.PipState.inPip = isInPictureInPictureMode
-    }
-
-    override fun onStop() {
-        super.onStop()
-        // The floating window was closed (a dismissed window stops the activity while still in PiP mode).
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N && isInPictureInPictureMode) {
-            app.playgram.core.player.PipState.pause?.invoke()
-        }
-    }
-
     private fun handleIncomingIntent(intent: Intent?) {
         intent ?: return
     }

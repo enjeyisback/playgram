@@ -399,14 +399,18 @@ private fun PlayerScreenContent(
     }
     androidx.activity.compose.BackHandler(enabled = fullscreen) { setFullscreen(false) }
     // Settings -> "Back button enters picture-in-picture": Back while playing floats the video.
-    val pipBackPref = remember { prefs.getBoolean("pip_back", false) }
+    val pipBackPref = remember { prefs.getBoolean("pip_back", true) }
     // Leaving with Back (system button or the arrow in the top bar): float the video when the setting is on.
     fun leavePlayer() {
         if (pipBackPref && isPlaying && !fullscreen && !inPip && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && activity != null) {
             val entered = try { activity.enterPictureInPictureMode(pip.params(false)) } catch (e: Exception) {
                 android.util.Log.e("PlaygramPlayer", "Back to PiP failed", e); false
             }
-            if (entered) return
+            if (entered) {
+                // Floating now: show the app (list / chat) behind the video.
+                context.startActivity(Intent(context, app.playgram.MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                return
+            }
         }
         onBack()
     }

@@ -84,7 +84,7 @@ private fun ToolsScreenContent(
     var autoPlay by remember { mutableStateOf(p.getBoolean("autoplay", true)) }
     var keepOn by remember { mutableStateOf(p.getBoolean("keep_screen_on", true)) }
     var pipHome by remember { mutableStateOf(p.getBoolean("pip_home", true)) }
-    var pipBack by remember { mutableStateOf(p.getBoolean("pip_back", false)) }
+    var pipBack by remember { mutableStateOf(p.getBoolean("pip_back", true)) }
     var query by remember { mutableStateOf("") }
     var cacheBytes by remember { mutableStateOf<Long?>(null) }
     var clearing by remember { mutableStateOf(false) }
