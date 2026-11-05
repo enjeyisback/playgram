@@ -319,6 +319,13 @@ private fun PlayerScreenContent(
             PlaygramApp.instance.telegramManager.nextVideoAfter(chat, msg) { nextItem = it }
         }
     }
+    var videos by remember { mutableStateOf<List<app.playgram.core.model.MediaItem>>(emptyList()) }
+    var showVideos by remember { mutableStateOf(false) }
+    LaunchedEffect(chatAndMsg) {
+        chatAndMsg?.let { (chat, msg) -> PlaygramApp.instance.telegramManager.videosNear(chat, msg) { videos = it } }
+    }
+    val curIdx = videos.indexOfFirst { Uri.parse(it.streamUrl).getQueryParameter("msg") == chatAndMsg?.second?.toString() }
+    val prevItem = videos.getOrNull(curIdx - 1)
     LaunchedEffect(countdown) {
         val c = countdown ?: return@LaunchedEffect
         val next = nextItem
@@ -583,6 +590,8 @@ private fun PlayerScreenContent(
                         Text(videoTitle, fontSize = 17.sp, fontWeight = FontWeight.Light, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(if (isLocalFile) "Saved file" else "Streaming", fontSize = 13.sp, fontWeight = FontWeight.Light, color = Color(0xCCFFFFFF))
                     }
+                    TopAction(Icons.Outlined.ScreenRotation, "Rotate Screen") { setFullscreen(!fullscreen) }
+                    if (videos.size > 1) TopAction(Icons.Outlined.VideoLibrary, "Videos") { showVideos = true }
                     IconButton(onClick = {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && activity != null) {
                             activity.enterPictureInPictureMode(pip.params(false))
@@ -598,6 +607,11 @@ private fun PlayerScreenContent(
                 ) {
                     IconButton(onClick = { exoPlayer.seekTo((exoPlayer.currentPosition - 10_000).coerceAtLeast(0)) }) {
                         Icon(Icons.Outlined.Replay10, "Back 10 seconds", tint = Color.White, modifier = Modifier.size(34.dp))
+                    }
+                    prevItem?.let { prev ->
+                        IconButton(onClick = { onPlayNext(prev.streamUrl, prev.title, fullscreen) }) {
+                            Icon(Icons.Outlined.SkipPrevious, "Previous video", tint = Color.White, modifier = Modifier.size(34.dp))
+                        }
                     }
                     Box(
                         Modifier
@@ -621,6 +635,11 @@ private fun PlayerScreenContent(
                     }
                     IconButton(onClick = { exoPlayer.seekTo((exoPlayer.currentPosition + 10_000).coerceAtMost(duration)) }) {
                         Icon(Icons.Outlined.Forward10, "Forward 10 seconds", tint = Color.White, modifier = Modifier.size(34.dp))
+                    }
+                    nextItem?.let { next ->
+                        IconButton(onClick = { onPlayNext(next.streamUrl, next.title, fullscreen) }) {
+                            Icon(Icons.Outlined.SkipNext, "Next video", tint = Color.White, modifier = Modifier.size(34.dp))
+                        }
                     }
                 }
 
@@ -647,41 +666,15 @@ private fun PlayerScreenContent(
                         Spacer(Modifier.width(8.dp))
                         Text("${fmt(currentPosition)} / ${fmt(duration)}", fontFamily = JetBrainsMono, fontSize = 12.sp, color = Color.White)
                     }
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(onClick = { showTrackSheet = true }) { Icon(Icons.Outlined.MusicNote, "Audio", tint = Color.White) }
-                        IconButton(onClick = { showTrackSheet = true }) { Icon(Icons.Outlined.ClosedCaption, "Subtitles", tint = Color.White) }
-                        Text(
-                            String.format("%.1f×", playbackSpeed),
-                            fontFamily = JetBrainsMono, fontSize = 13.sp, color = Color.White,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Color(0x44FFFFFF))
-                                .clickable {
-                                    playbackSpeed = when (playbackSpeed) { 1.0f -> 1.25f; 1.25f -> 1.5f; 1.5f -> 2.0f; else -> 1.0f }
-                                    exoPlayer.setPlaybackSpeed(playbackSpeed)
-                                }
-                                .padding(horizontal = 10.dp, vertical = 6.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            pictureModes[pictureMode],
-                            fontFamily = JetBrainsMono, fontSize = 13.sp, color = Color.White,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Color(0x44FFFFFF))
-                                .clickable { pictureMode = (pictureMode + 1) % pictureModes.size }
-                                .padding(horizontal = 10.dp, vertical = 6.dp)
-                        )
-                        IconButton(onClick = { setFullscreen(!fullscreen) }) {
-                            Icon(
-                                if (fullscreen) Icons.Outlined.FullscreenExit else Icons.Outlined.Fullscreen,
-                                "Fullscreen", tint = Color.White
-                            )
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        ToolButton(Icons.Outlined.ClosedCaption, "Subtitles", Modifier.weight(1f)) { showTrackSheet = true }
+                        ToolButton(Icons.Outlined.MusicNote, "Audio Tracks", Modifier.weight(1f)) { showTrackSheet = true }
+                        ToolButton(Icons.Outlined.Speed, "Speed ${String.format("%.2f", playbackSpeed).trimEnd('0').trimEnd('.')}×", Modifier.weight(1f)) {
+                            playbackSpeed = when (playbackSpeed) { 1.0f -> 1.25f; 1.25f -> 1.5f; 1.5f -> 2.0f; else -> 1.0f }
+                            exoPlayer.setPlaybackSpeed(playbackSpeed)
                         }
+                        ToolButton(Icons.Outlined.AspectRatio, "Scaling: ${pictureModes[pictureMode]}", Modifier.weight(1f)) { pictureMode = (pictureMode + 1) % pictureModes.size }
+                        ToolButton(Icons.Outlined.PlayCircle, "Player", Modifier.weight(1f)) { showPlayerPicker = true }
                     }
                 }
             }
@@ -853,6 +846,22 @@ private fun PlayerScreenContent(
         }
     }
 
+    if (showVideos) {
+        AlertDialog(
+            onDismissRequest = { showVideos = false },
+            title = { Text("Videos", fontWeight = FontWeight.Light, color = colors.textPrimary) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    videos.forEachIndexed { i, v ->
+                        TrackRow(v.title, i == curIdx) { showVideos = false; if (i != curIdx) onPlayNext(v.streamUrl, v.title, fullscreen) }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showVideos = false }) { Text("Close", color = AccentBlueLight) } },
+            containerColor = colors.surfaceVariant
+        )
+    }
+
     if (showTrackSheet) {
         val audioGroups = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO && it.isSupported }
         val textGroups = tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT && it.isSupported }
@@ -901,6 +910,23 @@ private fun trackLabel(f: Format, number: Int, audio: Boolean): String {
         when (f.channelCount) { 1 -> "mono"; 2 -> "stereo"; 6 -> "5.1"; 8 -> "7.1"; else -> null }
     ) else emptyList()
     return (listOf(name) + extra.filter { it.isNotBlank() && !name.contains(it, ignoreCase = true) }).joinToString(" · ")
+}
+
+@Composable
+private fun TopAction(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
+    Row(Modifier.clip(RoundedCornerShape(10.dp)).clickable(onClick = onClick).padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = Color.White, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(5.dp))
+        Text(label, fontSize = 13.sp, color = Color.White, maxLines = 1)
+    }
+}
+
+@Composable
+private fun ToolButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, modifier: Modifier, onClick: () -> Unit) {
+    Column(modifier.clip(RoundedCornerShape(10.dp)).clickable(onClick = onClick).padding(vertical = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Icon(icon, null, tint = Color.White, modifier = Modifier.size(20.dp))
+        Text(label, fontSize = 10.sp, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
 }
 
 @Composable

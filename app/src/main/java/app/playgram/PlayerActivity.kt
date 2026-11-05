@@ -17,6 +17,8 @@ class PlayerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         try { PlaygramApp.instance.appLockManager?.applySecurityFlags(this) } catch (_: Throwable) {}
+        // PipState is process-wide; a closed floating window never reports "left PiP", so a stale true made the next video open as a bare fullscreen surface.
+        PipState.inPip = false
         val url = intent.getStringExtra(EXTRA_URL) ?: run { finish(); return }
         val title = intent.getStringExtra(EXTRA_TITLE) ?: "Media Player"
         setContent {
@@ -39,6 +41,11 @@ class PlayerActivity : ComponentActivity() {
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: android.content.res.Configuration) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         PipState.inPip = isInPictureInPictureMode
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        PipState.inPip = false
     }
 
     override fun onStop() {

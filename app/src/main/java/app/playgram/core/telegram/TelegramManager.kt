@@ -521,6 +521,16 @@ class TelegramManager(private val context: Context) {
         }
     }
 
+    /** Videos posted around a message (up to 25 on each side), oldest first: the player's "Videos" list and previous button. */
+    fun videosNear(chatId: Long, msgId: Long, onResult: (List<MediaItem>) -> Unit) {
+        val c = tdClient
+        if (!loggedIn || c == null) { onResult(emptyList()); return }
+        c.send(TdApi.GetChatHistory(chatId, msgId, -25, 50, false)) { res ->
+            onResult((res as? TdApi.Messages)?.messages.orEmpty()
+                .filter { isVideoMessage(it) }.sortedBy { it.id }.mapNotNull { mediaOf(chatId, it) })
+        }
+    }
+
     /** A subtitle file posted in a chat. */
     data class SubtitleFile(val name: String, val fileId: Int)
 
