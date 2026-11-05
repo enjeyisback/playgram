@@ -437,6 +437,8 @@ private fun PlayerScreenContent(
             .fillMaxSize()
             .background(colors.background)
     ) {
+        // Portrait: keep the video (and its top bar) below the status bar; fullscreen hides the bars anyway.
+        if (!fullscreen && !inPip) Spacer(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars).background(Color.Black))
         // Video surface
         Box(
             modifier = (if (fullscreen || inPip) Modifier.fillMaxSize() else Modifier.fillMaxWidth().aspectRatio(16f / 9f))

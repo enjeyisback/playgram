@@ -60,7 +60,6 @@ private fun ToolsScreenContent(
     val scope = rememberCoroutineScope()
 
     val userProfile by telegramManager.userProfile.collectAsState()
-    val isDemoMode by telegramManager.isDemoMode.collectAsState()
     var showLoginDialog by remember { mutableStateOf(false) }
 
 
@@ -174,14 +173,9 @@ private fun ToolsScreenContent(
                         }
                     }
                     SettingRow(
-                        "Session · ${if (isDemoMode) "Sample data" else "Connected"}",
+                        "Session · Connected",
                         "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} · Android ${android.os.Build.VERSION.RELEASE} · Playgram ${app.playgram.BuildConfig.VERSION_NAME}"
                     )
-                    SettingSwitch(
-                        "Use sample data",
-                        "Show offline sample chats instead of your real Telegram chats",
-                        isDemoMode
-                    ) { telegramManager.toggleDemoMode(it) }
                     SettingRow(
                         "Log out",
                         "Removes this account from Playgram; saved files stay",
@@ -191,7 +185,7 @@ private fun ToolsScreenContent(
                 } else {
                     SettingRow(
                         "Not connected",
-                        "Sample data is showing. Log in to see your own channels, groups and cloud media."
+                        "Log in to see your own channels, groups and cloud media."
                     )
                     KinoButton(
                         "Connect Telegram account",

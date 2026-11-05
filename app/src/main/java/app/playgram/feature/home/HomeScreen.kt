@@ -199,7 +199,7 @@ fun HomeScreen(
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            if (connected) "Connected" else "Sample data · tap to log in",
+                            if (connected) "Connected" else "Not connected · tap to log in",
                             fontSize = 12.sp,
                             color = if (connected) StatusOnline else colors.textSecondary
                         )
